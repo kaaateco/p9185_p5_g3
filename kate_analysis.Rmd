@@ -1,0 +1,134 @@
+---
+title: "kate_analysis"
+author: "Kate Colvin"
+date: "2026-04-12"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(ggplot2)
+library(gtsummary)
+library(gt)
+library(lme4)
+library(lmerTest)
+
+```
+
+1) Did the pilot study provide any evidence for effectiveness of the intervention program (i.e. any clues to answer their questions for primary interests)? Describe and comment on the effect sizes. The primary outcome of interest is SFD (symptom free days in the past two weeks prior to each of the three time points).
+
+--
+
+# i) Formulation of the hypotheses relevant to specific questions and testing those hypotheses
+
+$H_0: $ No difference in the change of symptom-free days (SFD) over time between children receiving Asthma-PASS versus the standard of care. 
+$H_A: $ The children receiving Asthma-PASS show a greater improvement in SFD over time compared to the standard of care group. 
+
+$$
+H_0: \beta_3 = 0, \quad H_A: \beta_3 \neq 0
+$$
+
+$$
+\beta_3 = \text{difference in change of SFD over time between Asthma-PASS (intervention) and control groups}
+$$
+
+
+# ii) Presenting graphical displays and relevant descriptive statistics
+
+```{r}
+
+data <- readxl::read_excel("Proj 4 data.xlsx") %>% 
+  janitor::clean_names()
+
+data$group <- factor(data$group,
+                     levels = c(0, 1),
+                     labels = c("Control", "Intervention"))
+data$group <- relevel(factor(data$group), ref = "Control")
+
+data
+
+```
+
+Summary Table (Table 1)
+```{r}
+
+
+
+```
+
+Plots
+```{r}
+
+
+
+```
+
+
+# iii) Justification and description of the statistical modeling approach used (i.e. write down the statistical models with interpretation of model parameters)
+
+LMM model, interaction term is main variable of interest. 
+First, testing the inclusion of random effects by school (am already including random effects by student). 
+
+$$
+SFD_{ijt} = \beta_0 + \beta_1 \text{Time}_{t} + \beta_2 \text{Group}_{j} + \beta_3 (\text{Time}_{t} \times \text{Group}_{j}) + s_j + b_{ij} + \epsilon_{ijt}
+$$
+
+$$
+s_j \sim N(0, \sigma^2_{school}), \quad b_{ij} \sim N(0, \sigma^2_{child}), \quad \epsilon_{ijt} \sim N(0, \sigma^2)
+$$
+
+
+# iv) Summary of the results, with appropriate comments, tables and figures to support your answers
+
+Checking school-level clustering term:
+```{r}
+
+# With interaction, school clustering
+lmm_full <- lmer(sfd ~ time * group + (1 | school) + (1 | id), 
+                   data = data, REML = FALSE)
+summary(lmm_full)
+
+
+# With interaction, no school clustering
+lmm_no_school <- lmer(sfd ~ time * group + (1 | id), 
+                   data = data, REML = FALSE)
+summary(lmm_no_school)
+
+
+VarCorr(lmm_full)
+
+```
+
+The estimated variance of the school-level random effect was zero, likely due to the small number of clusters (four schools). 
+Main models exclude school-level random effect, but I will double check (but probably not present results) for the model including the school random effect. 
+
+```{r}
+
+# Interaction, no school clustering
+summary(lmm_no_school)
+
+# No interaction, no school clustering
+lmm_reduced <- lmer(sfd ~ time + group + (1 | id),
+                      data = data, REML = FALSE)
+summary(lmm_reduced)
+
+```
+
+```{r}
+
+# LRT
+anova(lmm_reduced, lmm_no_school)
+
+# I will turn this into a table 
+
+```
+
+Inclusion of the interaction term does not seem useful, fail to reject null.
+
+I will report reduced model results? Maybe report both? 
+Double check 
+
+Describe and comment on effect size. 
