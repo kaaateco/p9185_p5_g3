@@ -43,11 +43,17 @@ $$
 data <- readxl::read_excel("Proj 4 data.xlsx") %>% 
   janitor::clean_names()
 
-data$group <- factor(data$group,
-                     levels = c(0, 1),
-                     labels = c("Control", "Intervention"))
-data$group <- relevel(factor(data$group), ref = "Control")
-
+data <- data %>%
+  mutate(id = factor(id),
+         time = factor(time,
+                  levels = c(1, 2, 3),
+                  labels = c("Baseline", "6 months", "12 months")),
+         group = factor(group,
+                   levels = c(0, 1),
+                   labels = c("Control", "Intervention")),
+         school = factor(school,
+                    levels = c(1, 2, 3, 4),
+                    labels = c("School 1", "School 2", "School 3", "School 4")))
 data
 
 ```
@@ -55,6 +61,25 @@ data
 Summary Table (Table 1)
 ```{r}
 
+baseline_data <- data %>%
+  filter(time == "Baseline")
+
+
+table1 <- baseline_data %>%
+  select(group, sfd, school) %>%
+  tbl_summary(by = group,
+              label = list(
+                sfd ~ "Symptom-Free Days",
+                school ~ "School"),
+    digits = all_continuous() ~ 2) %>%
+  add_overall() %>%
+  bold_labels() %>% 
+  modify_caption("**Table 1**: name ")
+
+table1
+
+table1_gt <- table1 %>% as_gt()
+gtsave(table1_gt, "results/table1.png")
 
 
 ```
