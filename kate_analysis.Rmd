@@ -5,6 +5,10 @@ date: "2026-04-12"
 output: pdf_document
 ---
 
+TODO:
+- Data vis (2-3 plots)
+- Effect size
+
 ```{r setup, include=FALSE}
 
 knitr::opts_chunk$set(echo = TRUE)
@@ -74,7 +78,7 @@ table1 <- baseline_data %>%
     digits = all_continuous() ~ 2) %>%
   add_overall() %>%
   bold_labels() %>% 
-  modify_caption("**Table 1**: name ")
+  modify_caption("**Table 1**: Baseline Symptom-Free Days and School by Intervention Group")
 
 table1
 
@@ -127,33 +131,136 @@ VarCorr(lmm_full)
 
 ```
 
-The estimated variance of the school-level random effect was zero, likely due to the small number of clusters (four schools). 
-Main models exclude school-level random effect, but I will double check (but probably not present results) for the model including the school random effect. 
+The estimated variance of the school-level random effect was zero, likely due to the small number of clusters (four schools); also, this model had a singular fit. 
+Moving forward we exclude school-level random effect, results are identical in the model without the school-specific term. 
 
 ```{r}
 
 # Interaction, no school clustering
 summary(lmm_no_school)
 
+model_int_results <- tbl_regression(
+  lmm_no_school,
+  label = list(time ~ "Time", 
+               group ~ "Group"), 
+  conf.int = TRUE,
+  conf.level = 0.95) %>%
+  bold_labels() %>% 
+  bold_p() %>% 
+  modify_caption("**Table 2**: LMM Results, Including Treatment by Time Interaction")
+
+model_int_results
+
+
+table2_gt <- model_int_results %>% as_gt()
+gtsave(table2_gt, "results/table2.png")
+
+```
+
+
+```{r}
+
 # No interaction, no school clustering
 lmm_reduced <- lmer(sfd ~ time + group + (1 | id),
                       data = data, REML = FALSE)
 summary(lmm_reduced)
+
+model_red_results <- tbl_regression(
+  lmm_reduced,
+  label = list(time ~ "Time", 
+               group ~ "Group"), 
+  conf.int = TRUE,
+  conf.level = 0.95) %>%
+  bold_labels() %>% 
+  bold_p() %>% 
+  modify_caption("**Table 3**: LMM Results, No Treatment by Time Interaction")
+
+model_red_results
+
+
+table3_gt <- model_red_results %>% as_gt()
+gtsave(table3_gt, "results/table3.png")
 
 ```
 
 ```{r}
 
 # LRT
-anova(lmm_reduced, lmm_no_school)
+lrt <- anova(lmm_reduced, lmm_no_school)
 
-# I will turn this into a table 
+lrt_tbl <- as.data.frame(lrt) %>%
+  rownames_to_column(var = "Model") %>% 
+  select(Model, everything()) %>% 
+  rename(df = Df,
+         L.Ratio = Chisq,
+         `p-value` = `Pr(>Chisq)`) %>%
+  mutate(
+    logLik = round(logLik, 3),
+    AIC = round(AIC, 1),
+    BIC = round(BIC, 1),
+    L.Ratio = round(L.Ratio, 3),
+    `p-value` = signif(`p-value`, 4)) %>% 
+  select(Model, df, AIC, BIC, logLik, L.Ratio, `p-value`)
+
+lrt_tbl$Model <- c("Reduced (no interaction)", "Full (with interaction)")
+
+lrt_tbl
+
+gt(lrt_tbl) %>% 
+  tab_header(title = "Table 4: Likelihood Ratio Test, inclusion of Treatment by Time Interaction") %>% 
+  gtsave("results/table4.png")
 
 ```
 
 Inclusion of the interaction term does not seem useful, fail to reject null.
 
-I will report reduced model results? Maybe report both? 
-Double check 
+Describe and comment on effect size:
 
-Describe and comment on effect size. 
+In the full model with interaction, the intervention group improved by approximately 1.4–1.6 more symptom-free days than the control group at follow-up (respectively at 12 months and 6 months after baseline). Even though this is a moderate effect size, these results were not statistically significant. In an LRT, this full model was not a statistically significantly better fit than the model without this interaction term. 
+
+Looking at the reduced model, a statistically significant improvement in SFD was seen over time. Being 6 and 12 months past baseline were both associated with a ~2 day increase in SFD, compared to baseline. This is a roughly 15% increase over a 2 week time period. 
+
+Asthma-PASS did not show a statistically significant improvement in SFD compared to the control group. The slight positive direction of the coefficient indicates that the intervention contributes to an improvement in SFD, but the magnitude of this estimate is very small, and is not statistically significant (0.32). 
+
+
+
+Model Diagnostics 
+
+```{r}
+
+
+
+```
+
+
+
+
+
+-- 
+
+Checking that these results are the same for the LMMs with the school-level clustering:
+
+Both of these models have a singular fit
+
+```{r}
+
+# With school, with interaction
+summary(lmm_full)
+
+# With school, without interaction
+lmm_reduced_school <- lmer(sfd ~ time + group + (1 | school) + (1 | id), 
+                   data = data, REML = FALSE)
+summary(lmm_reduced_school)
+
+```
+
+```{r}
+
+anova(lmm_full, lmm_reduced_school)
+
+```
+
+LMM results are the same (interaction term does not improve fit). 
+
+
+
