@@ -265,14 +265,16 @@ p4 <- ggplot(diag_data, aes(x = time, y = resid)) +
        x = "Time",
        y = "Residuals")
 
+png("results/bb_glmm_diagnostics.png", width = 1600, height = 1000, res = 150)
+
 grid.arrange(p1, p2, p3, p4, nrow = 2)
+
+dev.off()
 
 ```
 
 The residuals vs. fitted plot exhibits a structured sloped-down due to sfd being bounded and discrete (0-14). 
 The Q-Q plot indicates some deviation from normality. Overall, the model seems to be an adequate fit to the data.
-
-
 
 
 
