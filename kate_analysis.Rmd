@@ -7,7 +7,8 @@ output: pdf_document
 
 TODO:
 - Data vis (2-3 plots)
-- Effect size
+- Effect size statistic (Cohen's D effect size??) 
+- Re-specify model equations
 
 ```{r setup, include=FALSE}
 
@@ -15,10 +16,13 @@ knitr::opts_chunk$set(echo = TRUE)
 
 library(tidyverse)
 library(ggplot2)
+library(gridExtra)
 library(gtsummary)
 library(gt)
 library(lme4)
 library(lmerTest)
+library(performance)
+library(glmmTMB)
 
 ```
 
@@ -99,7 +103,11 @@ Plots
 # iii) Justification and description of the statistical modeling approach used (i.e. write down the statistical models with interpretation of model parameters)
 
 LMM model, interaction term is main variable of interest. 
-First, testing the inclusion of random effects by school (am already including random effects by student). 
+First, testing the inclusion of random effects nested by school (am already including random effects by student). 
+
+Tried LMM, poor diagnostics 
+Tried Binomial LMM, slightly better diagnostics, but statistically significant over-dispersion
+Trying Beta-Binomial
 
 $$
 SFD_{ijt} = \beta_0 + \beta_1 \text{Time}_{t} + \beta_2 \text{Group}_{j} + \beta_3 (\text{Time}_{t} \times \text{Group}_{j}) + s_j + b_{ij} + \epsilon_{ijt}
@@ -112,11 +120,173 @@ $$
 
 # iv) Summary of the results, with appropriate comments, tables and figures to support your answers
 
-Checking school-level clustering term:
+-- Beta-Binomial GLMM -- 
+
 ```{r}
 
+# Create symptom days
+data <- data %>% mutate(failures = 14 - sfd)
+
+# Checking school-level random effect
+bb_glmm_full <- glmmTMB(
+  cbind(sfd, failures) ~ time * group + (1 | school/id),
+  family = betabinomial(link = "logit"),
+  data = data)
+
+VarCorr(bb_glmm_full)
+# Essentially 0 variation between schools
+
+```
+
+```{r}
+
+# With interaction
+bb_glmm <- glmmTMB(
+  cbind(sfd, failures) ~ time * group + (1 | id),
+  family = betabinomial(link = "logit"),
+  data = data)
+summary(bb_glmm)
+
+model_int_results <- tbl_regression(
+  bb_glmm,
+  label = list(time ~ "Time", 
+               group ~ "Group"), 
+  conf.int = TRUE,
+  conf.level = 0.95) %>%
+  bold_labels() %>% 
+  bold_p() %>% 
+  modify_caption("**Table 2**: Beta-Binomial GLMM Results, Including Treatment by Time Interaction")
+
+model_int_results
+
+
+table2_gt <- model_int_results %>% as_gt()
+gtsave(table2_gt, "results/table2.png")
+
+```
+
+```{r}
+
+# Without interaction
+bb_glmm_reduced <- glmmTMB(
+  cbind(sfd, failures) ~ time + group + (1 | id),
+  family = betabinomial(link = "logit"),
+  data = data)
+summary(bb_glmm_reduced)
+
+model_red_results <- tbl_regression(
+  bb_glmm_reduced,
+  label = list(time ~ "Time", 
+               group ~ "Group"), 
+  conf.int = TRUE,
+  conf.level = 0.95) %>%
+  bold_labels() %>% 
+  bold_p() %>% 
+  modify_caption("**Table 3**: Beta-Binomial GLMM Results, No Treatment by Time Interaction")
+
+model_red_results
+
+
+table3_gt <- model_red_results %>% as_gt()
+gtsave(table3_gt, "results/table3.png")
+
+```
+
+```{r}
+
+# LRT for interaction term
+lrt <- anova(bb_glmm_reduced, bb_glmm)
+
+lrt_tbl <- as.data.frame(lrt) %>%
+  rownames_to_column(var = "Model") %>% 
+  select(Model, everything()) %>% 
+  rename(df = Df,
+         L.Ratio = Chisq,
+         `p-value` = `Pr(>Chisq)`) %>%
+  mutate(
+    logLik = round(logLik, 3),
+    AIC = round(AIC, 1),
+    BIC = round(BIC, 1),
+    L.Ratio = round(L.Ratio, 3),
+    `p-value` = signif(`p-value`, 4)) %>% 
+  select(Model, df, AIC, BIC, logLik, L.Ratio, `p-value`)
+
+lrt_tbl$Model <- c("Reduced (no interaction)", "Full (with interaction)")
+
+lrt_tbl
+
+gt(lrt_tbl) %>% 
+  tab_header(title = "Table 4: Likelihood Ratio Test, inclusion of Treatment by Time Interaction") %>% 
+  gtsave("results/table4.png")
+
+```
+
+```{r}
+
+# No overdispersion this time!
+check_overdispersion(bb_glmm_reduced)
+
+```
+
+```{r}
+
+diag_data <- data.frame(
+  fitted = fitted(bb_glmm_reduced),
+  resid  = resid(bb_glmm_reduced),
+  time   = model.frame(bb_glmm_reduced)$time)
+
+# Residuals vs. Fitted values
+p1 <- ggplot(diag_data, aes(x = fitted, y = resid)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "red") +
+  labs(title = "Residuals vs Fitted",
+       x = "Fitted values",
+       y = "Residuals")
+
+# QQ-Plot
+p2 <- ggplot(diag_data, aes(sample = resid)) +
+  stat_qq() +
+  stat_qq_line(color = "red") +
+  labs(title = "Normal Q-Q Plot")
+
+# Residual Histogram
+p3 <- ggplot(diag_data, aes(x = resid)) +
+  geom_histogram(bins = 20,
+                 fill = "skyblue",
+                 color = "black") +
+  labs(title = "Histogram of Residuals",
+       x = "Residuals",
+       y = "Frequency")
+
+# Residuals vs Time
+p4 <- ggplot(diag_data, aes(x = time, y = resid)) +
+  geom_boxplot() +
+  labs(title = "Residuals by Time",
+       x = "Time",
+       y = "Residuals")
+
+grid.arrange(p1, p2, p3, p4, nrow = 2)
+
+```
+
+The residuals vs. fitted plot exhibits a structured sloped-down due to sfd being bounded and discrete (0-14). 
+The Q-Q plot indicates some deviation from normality. Overall, the model seems to be an adequate fit to the data.
+
+
+
+
+
+
+# Can ignore everything below this! LMM and Binomial GLMM Models 
+
+-- LMM --  
+
+```{r, eval = FALSE}
+
+# Checking school-level clustering term:
+
 # With interaction, school clustering
-lmm_full <- lmer(sfd ~ time * group + (1 | school) + (1 | id), 
+lmm_full <- lmer(sfd ~ time * group + (1 | school/id),
                    data = data, REML = FALSE)
 summary(lmm_full)
 
@@ -134,7 +304,7 @@ VarCorr(lmm_full)
 The estimated variance of the school-level random effect was zero, likely due to the small number of clusters (four schools); also, this model had a singular fit. 
 Moving forward we exclude school-level random effect, results are identical in the model without the school-specific term. 
 
-```{r}
+```{r, eval = FALSE}
 
 # Interaction, no school clustering
 summary(lmm_no_school)
@@ -157,8 +327,7 @@ gtsave(table2_gt, "results/table2.png")
 
 ```
 
-
-```{r}
+```{r, eval = FALSE}
 
 # No interaction, no school clustering
 lmm_reduced <- lmer(sfd ~ time + group + (1 | id),
@@ -183,7 +352,7 @@ gtsave(table3_gt, "results/table3.png")
 
 ```
 
-```{r}
+```{r, eval = FALSE}
 
 # LRT
 lrt <- anova(lmm_reduced, lmm_no_school)
@@ -223,44 +392,131 @@ Looking at the reduced model, a statistically significant improvement in SFD was
 Asthma-PASS did not show a statistically significant improvement in SFD compared to the control group. The slight positive direction of the coefficient indicates that the intervention contributes to an improvement in SFD, but the magnitude of this estimate is very small, and is not statistically significant (0.32). 
 
 
-
 Model Diagnostics 
 
-```{r}
+```{r, eval = FALSE}
 
+diag_data <- data.frame(
+  fitted = fitted(lmm_reduced),
+  resid  = resid(lmm_reduced),
+  time   = model.frame(lmm_reduced)$time)
 
+# Residuals vs. Fitted values
+p1 <- ggplot(diag_data, aes(x = fitted, y = resid)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "red") +
+  labs(title = "Residuals vs Fitted",
+       x = "Fitted values",
+       y = "Residuals")
+
+# QQ-Plot
+p2 <- ggplot(diag_data, aes(sample = resid)) +
+  stat_qq() +
+  stat_qq_line(color = "red") +
+  labs(title = "Normal Q-Q Plot")
+
+# Residual Histogram
+p3 <- ggplot(diag_data, aes(x = resid)) +
+  geom_histogram(bins = 20,
+                 fill = "skyblue",
+                 color = "black") +
+  labs(title = "Histogram of Residuals",
+       x = "Residuals",
+       y = "Frequency")
+
+# Residuals vs Time
+p4 <- ggplot(diag_data, aes(x = time, y = resid)) +
+  geom_boxplot() +
+  labs(title = "Residuals by Time",
+       x = "Time",
+       y = "Residuals")
+
+grid.arrange(p1, p2, p3, p4, nrow = 2)
 
 ```
 
 
-
-
-
--- 
-
 Checking that these results are the same for the LMMs with the school-level clustering:
 
-Both of these models have a singular fit
-
-```{r}
+```{r, eval = FALSE}
 
 # With school, with interaction
 summary(lmm_full)
 
 # With school, without interaction
-lmm_reduced_school <- lmer(sfd ~ time + group + (1 | school) + (1 | id), 
+lmm_reduced_school <- lmer(sfd ~ time + group + (1 | school/id), 
                    data = data, REML = FALSE)
 summary(lmm_reduced_school)
-
-```
-
-```{r}
 
 anova(lmm_full, lmm_reduced_school)
 
 ```
 
+
 LMM results are the same (interaction term does not improve fit). 
 
+-- Binomial LMM -- 
+
+```{r, eval = FALSE}
+
+# Create symptom days (failures)
+data <- data %>% mutate(failures = 14 - sfd)
+
+# Fit binomial mixed model
+glmm_binom <- glmer(
+  cbind(sfd, failures) ~ time * group + (1 | id),
+  data = data,
+  family = binomial)
+summary(glmm_binom)
+
+check_overdispersion(glmm_binom)
+
+```
+
+```{r, eval = FALSE}
+
+diag_data <- data.frame(
+  fitted = fitted(glmm_binom),
+  resid  = resid(glmm_binom),
+  time   = model.frame(glmm_binom)$time)
+
+# Residuals vs. Fitted values
+p1 <- ggplot(diag_data, aes(x = fitted, y = resid)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "red") +
+  labs(title = "Residuals vs Fitted",
+       x = "Fitted values",
+       y = "Residuals")
+
+# QQ-Plot
+p2 <- ggplot(diag_data, aes(sample = resid)) +
+  stat_qq() +
+  stat_qq_line(color = "red") +
+  labs(title = "Normal Q-Q Plot")
+
+# Residual Histogram
+p3 <- ggplot(diag_data, aes(x = resid)) +
+  geom_histogram(bins = 20,
+                 fill = "skyblue",
+                 color = "black") +
+  labs(title = "Histogram of Residuals",
+       x = "Residuals",
+       y = "Frequency")
+
+# Residuals vs Time
+p4 <- ggplot(diag_data, aes(x = time, y = resid)) +
+  geom_boxplot() +
+  labs(title = "Residuals by Time",
+       x = "Time",
+       y = "Residuals")
+
+grid.arrange(p1, p2, p3, p4, nrow = 2)
+
+```
+
+
+Significant overdispersion (dispersion = 1.54, p < 0.001), indicating violation of model assumptions. 
+Worse issue than LMM? I think. 
+Trying Beta-Binomial now. 
 
 
