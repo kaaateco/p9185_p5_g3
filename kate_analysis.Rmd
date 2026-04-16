@@ -21,6 +21,7 @@ library(lme4)
 library(lmerTest)
 library(performance)
 library(glmmTMB)
+library(DHARMa)
 
 ```
 
@@ -123,7 +124,7 @@ figure1 <- ggplot(data, aes(x = time, y = sfd, color = group, group = group)) +
   labs(x = "Time", y = "Mean Symptom-Free Days",
        title = "Mean Symptom-Free Days by Group Over Time") +
   theme_minimal()
-figure_mean
+figure1
 
 ggsave(filename = "results/line_plot.png", plot = figure1, 
       width = 8, height = 5, dpi = 300)
@@ -158,7 +159,8 @@ figure3 <- ggplot(data, aes(x = time, y = sfd, group = school, color = school)) 
   stat_summary(fun = mean, geom = "line", size = 1) +
   stat_summary(fun = mean, geom = "point", size = 3) +
   facet_wrap(~ group) +
-  labs(title = "Mean Symptom-Free Days by School and Group Over Time") +
+  labs(x = "Time", y = "Mean Symptom-Free Days", 
+       title = "Mean Symptom-Free Days by School and Group Over Time") +
   theme_minimal()
 
 ggsave(filename = "results/line_plot_school.png", plot = figure3, 
@@ -174,7 +176,7 @@ Included student-level random effect nested by school.
 
 Tried LMM, poor diagnostics 
 Tried Binomial LMM, slightly better diagnostics, but statistically significant over-dispersion
-Trying Beta-Binomial (settling on this!)
+Trying Beta-Binomial (settling on this!) with zero-inflation term
 
 $$
 SFD_{ijt} \sim \text{Beta-Binomial}(14,\; p_{ijt},\; \phi)
@@ -183,8 +185,9 @@ $$
 \text{logit}(p_{ijt}) = \beta_0 + \beta_1 \text{Time}_t + \beta_2 \text{Group}_j + \beta_3 (\text{Time}_t \times \text{Group}_j) + s_j + b_{ij}
 $$
 $$
-s_j \sim N(0, \sigma^2_{\text{school}}), \quad
-b_{ij} \sim N(0, \sigma^2_{\text{child}})
+s_j \sim N(0, \sigma^2_{\text{school}}, \quad
+b_{ij} \sim N(0, \sigma^2_{\text{child}}), \quad\quad
+\text{logit}(\pi) = \gamma_0
 $$
 
 
@@ -201,6 +204,7 @@ data <- data %>% mutate(failures = 14 - sfd)
 # Full Model
 bb_glmm_full <- glmmTMB(
   cbind(sfd, failures) ~ time * group + (1 | school/id),
+  ziformula = ~ 1, 
   family = betabinomial(link = "logit"),
   data = data)
 
@@ -234,6 +238,7 @@ gtsave(table2_gt, "results/table2.png")
 # Without interaction
 bb_glmm_reduced <- glmmTMB(
   cbind(sfd, failures) ~ time + group + (1 | school/id),
+  ziformula = ~ 1, 
   family = betabinomial(link = "logit"),
   data = data)
 summary(bb_glmm_reduced)
@@ -294,46 +299,16 @@ check_overdispersion(bb_glmm_reduced)
 
 ```{r}
 
-diag_data <- data.frame(
-  fitted = fitted(bb_glmm_reduced),
-  resid  = resid(bb_glmm_reduced),
-  time   = model.frame(bb_glmm_reduced)$time)
+# Model diagnostics 
 
-# Residuals vs. Fitted values
-p1 <- ggplot(diag_data, aes(x = fitted, y = resid)) +
-  geom_point(alpha = 0.6) +
-  geom_hline(yintercept = 0, color = "red") +
-  labs(title = "Residuals vs Fitted",
-       x = "Fitted values",
-       y = "Residuals")
+png("results/bb_glmm_diagnostics.png", width = 1200, height = 800. )
 
-# QQ-Plot
-p2 <- ggplot(diag_data, aes(sample = resid)) +
-  stat_qq() +
-  stat_qq_line(color = "red") +
-  labs(title = "Normal Q-Q Plot")
-
-# Residual Histogram
-p3 <- ggplot(diag_data, aes(x = resid)) +
-  geom_histogram(bins = 20,
-                 fill = "skyblue",
-                 color = "black") +
-  labs(title = "Histogram of Residuals",
-       x = "Residuals",
-       y = "Frequency")
-
-# Residuals vs Time
-p4 <- ggplot(diag_data, aes(x = time, y = resid)) +
-  geom_boxplot() +
-  labs(title = "Residuals by Time",
-       x = "Time",
-       y = "Residuals")
-
-png("results/bb_glmm_diagnostics.png", width = 1600, height = 1000, res = 150)
-
-grid.arrange(p1, p2, p3, p4, nrow = 2)
+res <- simulateResiduals(bb_glmm_reduced, n = 1000)
+plot(res)
 
 dev.off()
+
+# testZeroInflation(res)
 
 ```
 
