@@ -6,9 +6,7 @@ output: pdf_document
 ---
 
 TODO:
-- Data vis (2-3 plots)
 - Effect size statistic (Cohen's D effect size??) 
-- Re-specify model equations
 
 ```{r setup, include=FALSE}
 
@@ -66,8 +64,10 @@ data
 
 ```
 
-Summary Table (Table 1)
-```{r}
+Summary Table (Table 1) (Using Chhiring's instead)
+```{r, eval = FALSE}
+
+# Nevermind, just using Chhiring's Table 
 
 baseline_data <- data %>%
   filter(time == "Baseline")
@@ -92,10 +92,77 @@ gtsave(table1_gt, "results/table1.png")
 
 ```
 
-Plots
+Data Visualization
+
+```{r, eval = FALSE}
+
+# Spaghetti Plot
+
+figure1 <- ggplot(data, aes(x = time, y = sfd, group = id, color = school)) +
+  geom_line(alpha = 0.25) +
+  geom_point(alpha = 0.25) + 
+  stat_summary(aes(group = group), 
+               fun = mean, geom = "line", size = 1, color = "black") +
+  facet_wrap(~group) +
+  labs(x = "Time", y = "Symptom-Free Days (over 2 weeks)", 
+       title = "Individual Student Symptom-Free Days by Treatment") +
+  theme_minimal()
+
+figure1
+
+```
+
 ```{r}
 
+# Avg. Line Plot
 
+figure1 <- ggplot(data, aes(x = time, y = sfd, color = group, group = group)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun = mean, geom = "point", size = 3) +
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.1) +
+  labs(x = "Time", y = "Mean Symptom-Free Days",
+       title = "Mean Symptom-Free Days by Group Over Time") +
+  theme_minimal()
+figure_mean
+
+ggsave(filename = "results/line_plot.png", plot = figure1, 
+      width = 8, height = 5, dpi = 300)
+
+```
+
+```{r}
+
+# Boxplot
+
+figure2 <- ggplot(data, aes(x = time, y = sfd, fill = group)) +
+  geom_boxplot() +
+  # geom_violin(trim = FALSE) +
+  scale_y_continuous(limits = c(0, 16)) +
+  labs(x = "Time", y = "Symptom-Free Days",
+       title = "Distribution of Symptom-Free Days by Time and Group") +
+  theme_minimal()
+
+figure2
+
+
+ggsave(filename = "results/box_plot.png", plot = figure2, 
+      width = 8, height = 5, dpi = 300)
+
+```
+
+```{r}
+
+# Avg. Line Plot by School
+
+figure3 <- ggplot(data, aes(x = time, y = sfd, group = school, color = school)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun = mean, geom = "point", size = 3) +
+  facet_wrap(~ group) +
+  labs(title = "Mean Symptom-Free Days by School and Group Over Time") +
+  theme_minimal()
+
+ggsave(filename = "results/line_plot_school.png", plot = figure3, 
+      width = 8, height = 5, dpi = 300)
 
 ```
 
@@ -103,19 +170,23 @@ Plots
 # iii) Justification and description of the statistical modeling approach used (i.e. write down the statistical models with interpretation of model parameters)
 
 LMM model, interaction term is main variable of interest. 
-First, testing the inclusion of random effects nested by school (am already including random effects by student). 
+Included student-level random effect nested by school. 
 
 Tried LMM, poor diagnostics 
 Tried Binomial LMM, slightly better diagnostics, but statistically significant over-dispersion
-Trying Beta-Binomial
+Trying Beta-Binomial (settling on this!)
 
 $$
-SFD_{ijt} = \beta_0 + \beta_1 \text{Time}_{t} + \beta_2 \text{Group}_{j} + \beta_3 (\text{Time}_{t} \times \text{Group}_{j}) + s_j + b_{ij} + \epsilon_{ijt}
+SFD_{ijt} \sim \text{Beta-Binomial}(14,\; p_{ijt},\; \phi)
+$$
+$$
+\text{logit}(p_{ijt}) = \beta_0 + \beta_1 \text{Time}_t + \beta_2 \text{Group}_j + \beta_3 (\text{Time}_t \times \text{Group}_j) + s_j + b_{ij}
+$$
+$$
+s_j \sim N(0, \sigma^2_{\text{school}}), \quad
+b_{ij} \sim N(0, \sigma^2_{\text{child}})
 $$
 
-$$
-s_j \sim N(0, \sigma^2_{school}), \quad b_{ij} \sim N(0, \sigma^2_{child}), \quad \epsilon_{ijt} \sim N(0, \sigma^2)
-$$
 
 
 # iv) Summary of the results, with appropriate comments, tables and figures to support your answers
@@ -127,7 +198,7 @@ $$
 # Create symptom days
 data <- data %>% mutate(failures = 14 - sfd)
 
-# Checking school-level random effect
+# Full Model
 bb_glmm_full <- glmmTMB(
   cbind(sfd, failures) ~ time * group + (1 | school/id),
   family = betabinomial(link = "logit"),
@@ -140,15 +211,8 @@ VarCorr(bb_glmm_full)
 
 ```{r}
 
-# With interaction
-bb_glmm <- glmmTMB(
-  cbind(sfd, failures) ~ time * group + (1 | id),
-  family = betabinomial(link = "logit"),
-  data = data)
-summary(bb_glmm)
-
-model_int_results <- tbl_regression(
-  bb_glmm,
+model_full_results <- tbl_regression(
+  bb_glmm_full,
   label = list(time ~ "Time", 
                group ~ "Group"), 
   conf.int = TRUE,
@@ -157,10 +221,10 @@ model_int_results <- tbl_regression(
   bold_p() %>% 
   modify_caption("**Table 2**: Beta-Binomial GLMM Results, Including Treatment by Time Interaction")
 
-model_int_results
+model_full_results
 
 
-table2_gt <- model_int_results %>% as_gt()
+table2_gt <- model_full_results %>% as_gt()
 gtsave(table2_gt, "results/table2.png")
 
 ```
@@ -169,7 +233,7 @@ gtsave(table2_gt, "results/table2.png")
 
 # Without interaction
 bb_glmm_reduced <- glmmTMB(
-  cbind(sfd, failures) ~ time + group + (1 | id),
+  cbind(sfd, failures) ~ time + group + (1 | school/id),
   family = betabinomial(link = "logit"),
   data = data)
 summary(bb_glmm_reduced)
@@ -195,7 +259,7 @@ gtsave(table3_gt, "results/table3.png")
 ```{r}
 
 # LRT for interaction term
-lrt <- anova(bb_glmm_reduced, bb_glmm)
+lrt <- anova(bb_glmm_reduced, bb_glmm_full)
 
 lrt_tbl <- as.data.frame(lrt) %>%
   rownames_to_column(var = "Model") %>% 
