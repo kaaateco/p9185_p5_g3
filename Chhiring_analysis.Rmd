@@ -40,7 +40,7 @@ options(scipen = 999)
 
 Import and clean the dataset
 ```{r}
-df <- read.xlsx("Proj_4_data.xlsx") |> 
+df <- read.xlsx("Proj 4 data.xlsx") |> 
   janitor::clean_names() |> 
   mutate(time = case_when(time == 1 ~ "Baseline", 
                           time == 2 ~ "6 Month", 
