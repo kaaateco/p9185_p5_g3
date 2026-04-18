@@ -35,7 +35,7 @@ $H_0: $ No difference in the change of symptom-free days (SFD) over time between
 $H_A: $ The children receiving Asthma-PASS show a greater improvement in SFD over time compared to the standard of care group. 
 
 $$
-H_0: \beta_3 = 0, \quad H_A: \beta_3 \neq 0
+H_0: \beta_3 = 0, \quad H_A: \beta_3 > 0
 $$
 
 $$
@@ -158,6 +158,7 @@ ggsave(filename = "results/box_plot.png", plot = figure2,
 figure3 <- ggplot(data, aes(x = time, y = sfd, group = school, color = school)) +
   stat_summary(fun = mean, geom = "line", size = 1) +
   stat_summary(fun = mean, geom = "point", size = 3) +
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.1) +
   facet_wrap(~ group) +
   labs(x = "Time", y = "Mean Symptom-Free Days", 
        title = "Mean Symptom-Free Days by School and Group Over Time") +
@@ -301,7 +302,7 @@ check_overdispersion(bb_glmm_reduced)
 
 # Model diagnostics 
 
-png("results/bb_glmm_diagnostics.png", width = 1200, height = 800. )
+png("results/bb_glmm_diagnostics.png", width = 1200, height = 800)
 
 res <- simulateResiduals(bb_glmm_reduced, n = 1000)
 plot(res)
