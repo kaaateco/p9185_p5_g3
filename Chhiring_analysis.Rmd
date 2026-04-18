@@ -1,0 +1,285 @@
+---
+title: "Chhiring Analysis"
+author: "Chhiring Lama"
+date: "2026-04-12"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 2
+header-includes:
+  - \usepackage{fancyhdr}
+  - \usepackage{lipsum}
+  - \pagestyle{fancy}
+  - \fancyhead[R]{\thepage}
+  - \fancypagestyle{plain}{\pagestyle{fancy}}
+  - \usepackage{enumitem}
+  - \usepackage{float}
+  - \usepackage{amsmath}
+  - \usepackage{amssymb}
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(openxlsx)
+library(gtsummary)
+library(gt)
+
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+
+options(scipen = 999)
+```
+
+Import and clean the dataset
+```{r}
+df <- read.xlsx("Proj_4_data.xlsx") |> 
+  janitor::clean_names() |> 
+  mutate(time = case_when(time == 1 ~ "Baseline", 
+                          time == 2 ~ "6 Month", 
+                         time == 3 ~ "12 Month"), 
+         time = fct_relevel(time, "Baseline", "6 Month"),
+         group = case_when(group == 1 ~ "Asthma-PASS", ##intervention
+                           group == 0 ~ "AM"),  ##standard of care
+         group = as.factor(group), 
+         school = as.factor(school)) |> 
+  as_tibble()
+```
+
+324 total observations, has 32 observations with 0 --> sparse?
+
+108 people across (49 control:21,28 in each site, 59 tx: 28, 31 in each site)
+
+###Summary Table (observations per time point)
+```{r}
+table1a  <- df %>%
+  drop_na() |> 
+  mutate(`Baseline SFD` = case_when(time == "Baseline" ~ as.integer(sfd), 
+                                time != "Baseline" ~ NA)) |> 
+  dplyr::select(time, school, group, `Baseline SFD`) %>%
+  tbl_strata(
+      strata = group,
+      .tbl_fun = ~ {
+        dat <- .x %>%
+          dplyr::mutate(
+            school = factor(as.character(school)) 
+          )
+  
+        tbl_summary(
+          dat,
+          by = school,
+          missing = "no",
+          label = list(
+            time = "Time"
+          )
+        ) %>%
+          add_p() %>%
+          add_overall() |> 
+          bold_labels()
+      },
+      .header = "**{strata}**, N = {n}"
+    ) 
+
+table1a |> 
+  as_gt() |> 
+  tab_options(
+    table.font.size = px(12)) |>  
+  cols_width(
+    label      ~ px(120),
+    everything() ~ px(70)
+  ) |>
+  gt::gtsave(filename = "figures_tables/tab1a.pdf")
+
+table1a |> 
+  as_kable()
+```
+
+```{r}
+table1b <-  df %>%
+  drop_na() |> 
+  mutate(`Baseline SFD` = case_when(time == "Baseline" ~ as.integer(sfd), 
+                                time != "Baseline" ~ NA)) |> 
+  dplyr::select(time, group, `Baseline SFD`) |> 
+  tbl_summary(by = group,
+              label = list(time = "Time"), 
+              missing = "no") |> 
+  add_overall() |> 
+  add_p() |> 
+  modify_spanning_header(all_stat_cols() ~ "**Overall**")
+
+table1b |> 
+  as_gt() |> 
+  tab_options(
+    table.font.size = px(12)) |>  
+  cols_width(
+    label      ~ px(120),
+    everything() ~ px(80)
+  ) |>
+  gt::gtsave(filename = "figures_tables/summarytab.pdf")
+
+table1b |> 
+  as_kable()
+```
+
+##N_irt Calculation
+```{r}
+sig = 0.05/4
+power = 0.80
+d = 1/3
+z_1minusa = qnorm(1-sig/2)
+z_power = qnorm(power)
+n_pergroup = 2*(z_1minusa + z_power)^2/(d^2)
+n_pergroup
+```
+
+model from pilot study:
+```{r}
+library(lme4)
+library(lmerTest)
+data_grouped <- df %>%
+  mutate(sfd = sfd,
+         no_sfd = 14 - sfd)
+
+# mod_num <- glmer(
+#   cbind(sfd, no_sfd) ~ time * group + (1 | school/id),
+#   family = betabinomial,
+#   data = data_grouped,
+#   control = glmerControl(optimizer = "bobyqa", 
+#                          optCtrl = list(maxfun = 2e5))
+# )
+
+library(glmmTMB)
+mod_num <- glmmTMB(cbind(sfd, no_sfd) ~ time * group + (1 | school/id),
+                  data = data_grouped, 
+                  family = betabinomial)
+
+##sigma_b 
+sigma_b = attr(VarCorr(mod_num)$cond$`id:school`, "stddev")
+sigma_c = attr(VarCorr(mod_num)$cond$`school`, "stddev")
+names(sigma_b) = NULL
+names(sigma_c) = NULL
+##resiudal
+sigma = sd(residuals(mod_num))
+#sigma = pi^2/3
+```
+
+```{r}
+library(emmeans)
+emm <- emmeans(mod_num, ~ group | time)
+cont = contrast(emm, method = "revpairwise")
+summary(cont, infer = c(TRUE, TRUE), side = ">", adjust = "bonferonni")
+```
+
+Ncrt accounting for ICC (previous version)
+```{r}
+rho = sigma_c^2/(sigma_b^2 + sigma_c^2 + sigma^2) #(ICC) need to replace once we have this info from Kate
+r = -0.044 #(based on baseline to 6 month and baseline to 12 month correlation)
+k = 30/2 #15 schools per arm
+n_irt_total = n_pergroup
+m = (n_irt_total*(1-rho))/(k - n_irt_total*rho)
+```
+
+NCrt with assumed ICC (previous version)
+```{r}
+sig = 0.05/4
+power = 0.80
+d = 1/3
+z_1minusa = qnorm(1-sig/2)
+z_power = qnorm(power)
+n_pergroup = 2*(z_1minusa + z_power)^2/(d^2)
+n_pergroup
+
+icc_list <- c(0, 0.01, 0.02, 0.03, 0.04, 0.05)
+
+get_m <- lapply(icc_list, function(rho){
+  print(rho)
+  k = 30/2 #15 schools per arm
+  n_irt_total = n_pergroup
+  n_rho = n_irt_total*rho
+  m = (n_irt_total*(1-rho))/(k - n_irt_total*rho)
+  n = ceiling(m)*k
+  m_adj = m/(1-0.2)
+  n_adj = ceiling(m_adj)*k
+  df <- as_tibble(
+    list(Nirt_rho = round(n_rho, digits =3),
+         M = round(m, digits =3), 
+         N = n, M_adj = round(m_adj, digits =3), N_adj = n_adj)
+  )
+  return(df)
+})
+
+assumed_icc_samp <- Reduce(rbind, get_m)
+```
+
+NCrt (using before and after observations)
+```{r}
+rho = sigma_c^2/(sigma_b^2 + sigma_c^2 + sigma^2) #(ICC) need to replace once we have this info from Kate
+r = -0.044 #(based on baseline to 6 month and baseline to 12 month correlation)
+k = 30/2 #15 schools per arm
+
+a = -2*rho*k
+b = 4*n_irt_total*rho*(1-rho) + 2*k*(rho -1)
+c = 2*n_irt_total*(1 + rho^2) - 4*n_irt_total*rho
+mo = (-b - sqrt(b^2 -4*a*c))/(2*a)
+m1 = (-b + sqrt(b^2 -4*a*c))/(2*a)
+m = c(mo, m1)
+m = m[m > 0]
+```
+
+
+NCrt with assumed ICC
+```{r}
+sig = 0.05/4
+power = 0.80
+d = 1/3
+z_1minusa = qnorm(1-sig/2)
+z_power = qnorm(power)
+n_pergroup = 2*(z_1minusa + z_power)^2/(d^2)
+n_pergroup
+
+rho = sigma_c^2/(sigma_b^2 + sigma_c^2 + sigma^2) #(ICC) need to replace once we have this info from Kate
+r = -0.044 #(based on baseline to 6 month and baseline to 12 month correlation), no need since assumed from the equation?
+k = 30/2 #15 schools per arm
+
+
+icc_list <- c(0.005, 0.01, 0.02, 0.03, 0.04, 0.05)
+
+get_m <- lapply(icc_list, function(rho){
+  print(rho)
+  k = 30/2 #15 schools per arm
+  n_irt_total = n_pergroup
+  n_rho = n_irt_total*rho
+  
+  a = -2*rho*k
+  b = 4*n_irt_total*rho*(1-rho) + 2*k*(rho -1)
+  c = 2*n_irt_total*(1 + rho^2) - 4*n_irt_total*rho
+  mo = (-b - sqrt(b^2 -4*a*c))/(2*a)
+  m1 = (-b + sqrt(b^2 -4*a*c))/(2*a)
+  m = c(mo, m1)
+  print(m)
+  m = m[m > 0]
+
+  n = ceiling(m)*k
+  m_adj = m/(1-0.2)
+  n_adj = ceiling(m_adj)*k
+  df <- as_tibble(
+    list(Nirt_rho = round(n_rho, digits =3),
+         M = round(m, digits =3), 
+         N = n, M_adj = round(m_adj, digits =3), N_adj = n_adj)
+  )
+  return(df)
+})
+
+assumed_icc_samp <- Reduce(rbind, get_m)
+```
+
+
+
+
