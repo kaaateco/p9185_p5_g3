@@ -5,9 +5,6 @@ date: "2026-04-12"
 output: pdf_document
 ---
 
-TODO:
-- Effect size statistic (Cohen's D effect size??) 
-
 ```{r setup, include=FALSE}
 
 knitr::opts_chunk$set(echo = TRUE)
@@ -95,25 +92,7 @@ gtsave(table1_gt, "results/table1.png")
 
 Data Visualization
 
-```{r, eval = FALSE}
-
-# Spaghetti Plot
-
-figure1 <- ggplot(data, aes(x = time, y = sfd, group = id, color = school)) +
-  geom_line(alpha = 0.25) +
-  geom_point(alpha = 0.25) + 
-  stat_summary(aes(group = group), 
-               fun = mean, geom = "line", size = 1, color = "black") +
-  facet_wrap(~group) +
-  labs(x = "Time", y = "Symptom-Free Days (over 2 weeks)", 
-       title = "Individual Student Symptom-Free Days by Treatment") +
-  theme_minimal()
-
-figure1
-
-```
-
-```{r}
+```{r, warning = FALSE}
 
 # Avg. Line Plot
 
@@ -123,11 +102,35 @@ figure1 <- ggplot(data, aes(x = time, y = sfd, color = group, group = group)) +
   stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.1) +
   labs(x = "Time", y = "Mean Symptom-Free Days",
        title = "Mean Symptom-Free Days by Group Over Time") +
-  theme_minimal()
-figure1
+  theme_minimal() +
+  theme(plot.title = element_text(size = 12)) +
+  coord_cartesian(ylim = c(6, 14))
 
-ggsave(filename = "results/line_plot.png", plot = figure1, 
-      width = 8, height = 5, dpi = 300)
+# ggsave(filename = "results/line_plot.png", plot = figure1, 
+#      width = 8, height = 5, dpi = 300)
+
+
+# Avg. Line Plot by School
+
+figure3 <- ggplot(data, aes(x = time, y = sfd, group = school, color = school)) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun = mean, geom = "point", size = 3) +
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.1) +
+  facet_wrap(~ group) +
+  labs(x = "Time", y = "Mean Symptom-Free Days", 
+       title = "Mean Symptom-Free Days by School and Group Over Time") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 12)) +
+  coord_cartesian(ylim = c(6, 14))
+
+# ggsave(filename = "results/line_plot_school.png", plot = figure3, 
+#      width = 8, height = 5, dpi = 300)
+
+
+figure1_combined <- grid.arrange(figure1, figure3, nrow = 2)
+
+ggsave(filename = "results/line_plot_combined.png", plot = figure1_combined, 
+       width = 6, height = 6, dpi = 300)
 
 ```
 
@@ -151,24 +154,6 @@ ggsave(filename = "results/box_plot.png", plot = figure2,
 
 ```
 
-```{r}
-
-# Avg. Line Plot by School
-
-figure3 <- ggplot(data, aes(x = time, y = sfd, group = school, color = school)) +
-  stat_summary(fun = mean, geom = "line", size = 1) +
-  stat_summary(fun = mean, geom = "point", size = 3) +
-  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.1) +
-  facet_wrap(~ group) +
-  labs(x = "Time", y = "Mean Symptom-Free Days", 
-       title = "Mean Symptom-Free Days by School and Group Over Time") +
-  theme_minimal()
-
-ggsave(filename = "results/line_plot_school.png", plot = figure3, 
-      width = 8, height = 5, dpi = 300)
-
-```
-
 
 # iii) Justification and description of the statistical modeling approach used (i.e. write down the statistical models with interpretation of model parameters)
 
@@ -187,10 +172,31 @@ $$
 $$
 $$
 s_j \sim N(0, \sigma^2_{\text{school}}, \quad
-b_{ij} \sim N(0, \sigma^2_{\text{child}}), \quad\quad
+b_{ij} \sim N(0, \sigma^2_{\text{child}}), \quad
 \text{logit}(\pi) = \gamma_0
 $$
 
+
+```{r}
+
+# Plot of zero-inflated data (data distribution) (figure 3)
+
+sfd_dist <- ggplot(data, aes(x = sfd)) +
+  geom_histogram(binwidth = 1, fill = "navy") +
+  scale_x_continuous(breaks = 0:14) +
+  labs(title = "Distribution of Symptom-Free Days",
+       x = "SFD (0–14 days)", y = "Count") +
+  theme_minimal()
+
+sfd_dist
+
+ggsave(filename = "results/sfd_dist.png", plot = sfd_dist, 
+      width = 8, height = 5, dpi = 300)
+
+```
+
+Observations at both extremes (0 and 14 days), indicating potential deviations from beta-binomial.
+Zero-inflated approach was added to assess whether there was more zero values than what was expected (beyond what the beta-binomial model could capture). 
 
 
 # iv) Summary of the results, with appropriate comments, tables and figures to support your answers
@@ -309,7 +315,13 @@ plot(res)
 
 dev.off()
 
-# testZeroInflation(res)
+
+
+png("results/zi_plot.png", width = 1200, height = 800)
+
+testZeroInflation(res)
+
+dev.off()
 
 ```
 
@@ -320,6 +332,7 @@ The Q-Q plot indicates some deviation from normality. Overall, the model seems t
 
 
 # Can ignore everything below this! LMM and Binomial GLMM Models 
+-> Binomial LMM section has overdispersion test results for model justification!
 
 -- LMM --  
 
@@ -506,7 +519,7 @@ data <- data %>% mutate(failures = 14 - sfd)
 
 # Fit binomial mixed model
 glmm_binom <- glmer(
-  cbind(sfd, failures) ~ time * group + (1 | id),
+  cbind(sfd, failures) ~ time * group + (1 | school/id),
   data = data,
   family = binomial)
 summary(glmm_binom)
